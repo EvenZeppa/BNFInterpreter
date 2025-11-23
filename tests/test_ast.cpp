@@ -3,19 +3,6 @@
 #include <sstream>
 #include <iostream>
 
-void printAST(ASTNode* node, int indent = 0) {
-    if (!node) return;
-
-    std::string pad(indent * 2, ' ');
-    std::cout << pad << node->symbol
-              << (node->matched.empty() ? "" : " [match=\"" + node->matched + "\"]")
-              << std::endl;
-
-    for (size_t i = 0; i < node->children.size(); ++i) {
-        printAST(node->children[i], indent + 1);
-    }
-}
-
 void test_node_creation() {
     ASTNode* node = new ASTNode("root");
     ASSERT_EQ(node->symbol, "root");

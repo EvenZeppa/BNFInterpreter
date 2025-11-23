@@ -19,7 +19,12 @@ std::string BNFParser::stripQuotes(const std::string& s) const{
     return s;
 }
 
-ASTNode* BNFParser::parse(const std::string& ruleName, const std::string& input) const {
+ASTNode* BNFParser::parse(const std::string& ruleName,
+                          const std::string& input,
+                          size_t& consumed) const
+{
+    consumed = 0;
+
     Rule* r = grammar.getRule(ruleName);
     if (!r) {
         std::cerr << "BNFParser::parse: rule not found: " << ruleName << std::endl;
@@ -30,14 +35,16 @@ ASTNode* BNFParser::parse(const std::string& ruleName, const std::string& input)
     ASTNode* root = 0;
     bool ok = parseExpression(r->rootExpr, input, pos, root);
 
-    // Exiger que l'input soit entièrement consommé pour considérer le parse comme réussi.
-    if (!ok || pos != input.size()) {
+    if (!ok) {
         if (root) delete root;
         return 0;
     }
 
+    consumed = pos;   // <--- important : on exporte ce que le parser a mangé
+
     return root;
 }
+
 
 bool BNFParser::parseExpression(Expression* expr,
                                 const std::string& input,

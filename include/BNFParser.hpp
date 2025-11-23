@@ -11,7 +11,9 @@ public:
     BNFParser(const Grammar& g);
     ~BNFParser();
 
-    ASTNode* parse(const std::string& ruleName, const std::string& input) const;
+	ASTNode* parse(const std::string& ruleName,
+				const std::string& input,
+				size_t& consumed) const;
 
 private:
     const Grammar& grammar;

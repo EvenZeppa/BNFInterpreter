@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <iostream>
 
 struct ASTNode {
     std::string symbol;
@@ -12,5 +13,7 @@ struct ASTNode {
     ASTNode(const std::string& s);
     ~ASTNode();
 };
+
+void printAST(const ASTNode* node, int indent = 0);
 
 #endif
