@@ -12,10 +12,18 @@ Rule::~Rule() { delete rootExpr; }
 
 // ---------------- Grammar ----------------
 // Grammar lifecycle: initialize debug flag and clean up allocated rules.
-Grammar::Grammar() : arena(0) {}
+Grammar::Grammar() : arena(0), interner(0) {}
 Grammar::~Grammar() {
-    // When using an arena, memory is released in bulk; avoid double delete.
+    // When using arena, memory is owned by the arena; skip deletes entirely.
     if (arena) return;
+    // When using interner without arena, avoid double-freeing shared nodes.
+    if (interner) {
+        for (size_t i = 0; i < rules.size(); ++i) {
+            if (rules[i]) rules[i]->rootExpr = 0;
+            delete rules[i];
+        }
+        return;
+    }
     for (size_t i = 0; i < rules.size(); ++i) {
         DEBUG_MSG("Deleting rule: " + rules[i]->name);
         delete rules[i];
@@ -36,6 +44,11 @@ Expression* Grammar::createExpr(Expression::Type type) {
         return mem ? new (mem) Expression(type) : 0;
     }
     return new Expression(type);
+}
+
+Expression* Grammar::internIfEnabled(Expression* expr) {
+    if (!interner) return expr;
+    return interner->intern(expr, arena != 0);
 }
 
 // addRule: parse a textual rule of the form "LHS ::= RHS".
@@ -104,7 +117,7 @@ Expression* Grammar::parseExpression(BNFTokenizer& tz) {
 
     if (alt->children.size() == 1) {
         Expression* single = alt->children[0];
-        delete alt;
+        if (!arena) delete alt;
         return single;
     }
 
@@ -112,7 +125,7 @@ Expression* Grammar::parseExpression(BNFTokenizer& tz) {
     ss << "parseExpression: type=EXPR_ALTERNATIVE, children=" << alt->children.size();
     DEBUG_MSG(ss.str());
 
-    return alt;
+    return internIfEnabled(alt);
 }
 
 // parseSequence: parse a series of terms into a sequence node. Stops when
@@ -145,7 +158,7 @@ Expression* Grammar::parseSequence(BNFTokenizer& tz) {
     ss << "parseSequence: type=EXPR_SEQUENCE, children=" << seq->children.size();
     DEBUG_MSG(ss.str());
 
-    return seq;
+    return internIfEnabled(seq);
 }
 
 // parseTerm: handle repetition '{ ... }' and optional '[ ... ]' constructs.
@@ -166,7 +179,7 @@ Expression* Grammar::parseTerm(BNFTokenizer& tz) {
         ss << "parseTerm: EXPR_REPEAT, children=" << rep->children.size();
         DEBUG_MSG(ss.str());
 
-        return rep;
+        return internIfEnabled(rep);
     }
 
     if (t.type == Token::TOK_LBRACKET) {
@@ -182,7 +195,7 @@ Expression* Grammar::parseTerm(BNFTokenizer& tz) {
         ss << "parseTerm: EXPR_OPTIONAL, children=" << opt->children.size();
         DEBUG_MSG(ss.str());
 
-        return opt;
+        return internIfEnabled(opt);
     }
 
     return parseFactor(tz);
@@ -221,7 +234,7 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
             ss << "parseFactor: EXPR_CHAR_RANGE, start=" << (int)start << ", end=" << (int)end;
             DEBUG_MSG(ss.str());
             
-            return e;
+                return internIfEnabled(e);
         }
         
         // Regular terminal (not a range)
@@ -232,7 +245,7 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
         ss << "parseFactor: EXPR_TERMINAL, value=" << t.value;
         DEBUG_MSG(ss.str());
 
-        return e;
+            return internIfEnabled(e);
     }
 
     if (t.type == Token::TOK_SYMBOL) {
@@ -243,7 +256,7 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
         ss << "parseFactor: EXPR_SYMBOL, value=" << t.value;
         DEBUG_MSG(ss.str());
 
-        return e;
+            return internIfEnabled(e);
     }
 
     if (t.type == Token::TOK_WORD) {
@@ -254,7 +267,7 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
         ss << "parseFactor: EXPR_TERMINAL, value=" << t.value;
         DEBUG_MSG(ss.str());
 
-        return e;
+            return internIfEnabled(e);
     }
 
     std::cerr << "Unexpected token: " << t.value << std::endl;
@@ -338,7 +351,7 @@ Expression* Grammar::parseCharClass(BNFTokenizer& tz) {
     }
 
     DEBUG_MSG("parseCharClass: bitmap built");
-    return cls;
+    return internIfEnabled(cls);
 }
 
 // tokenToChar: convert a terminal or hex token to a character value

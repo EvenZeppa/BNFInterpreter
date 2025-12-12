@@ -5,6 +5,7 @@
 #include <vector>
 #include "Expression.hpp"
 #include "BNFTokenizer.hpp"
+#include "ExpressionInterner.hpp"
 #include "Arena.hpp"
 
 /**
@@ -67,9 +68,15 @@ public:
 	 */
 	void setArena(Arena* a) { arena = a; }
 
+	/**
+	 * @brief Attach an expression interner for deduplication (optional).
+	 */
+	void setInterner(ExpressionInterner* i) { interner = i; }
+
 private:
 	Rule* createRule();
 	Expression* createExpr(Expression::Type type);
+	Expression* internIfEnabled(Expression* expr);
 
 	/**
 	 * @brief Parses alternatives separated by '|' operators.
@@ -115,5 +122,6 @@ private:
 
 	std::vector<Rule*> rules;   ///< Collection of grammar rules
 	Arena* arena;               ///< Optional arena for allocations (nullable)
+	ExpressionInterner* interner; ///< Optional interner for deduplication
 };
 #endif
