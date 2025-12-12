@@ -3,6 +3,7 @@
 #include "../include/Debug.hpp"
 #include <iostream>
 #include <cstring>
+#include <sstream>
 
 // BNFParser implementation
 BNFParser::BNFParser(const Grammar& g)
@@ -11,6 +12,80 @@ BNFParser::BNFParser(const Grammar& g)
 }
 
 BNFParser::~BNFParser() {}
+
+// New unified parse interface with ParseContext
+void BNFParser::parse(const std::string& ruleName,
+                      const std::string& input,
+                      ParseContext& ctx) const
+{
+    DEBUG_MSG("Starting parse (ParseContext) for rule: " + ruleName + " with input: '" + input + "'");
+    
+    // Reset context
+    ctx.reset();
+    
+    // Find the requested grammar rule
+    Rule* r = grammar.getRule(ruleName);
+    if (!r) {
+        DEBUG_MSG("Rule not found: " + ruleName);
+        ctx.success = false;
+        ctx.errorPos = 0;
+        ctx.expected = "rule <" + ruleName + "> (not found in grammar)";
+        return;
+    }
+    
+    // Attempt to parse the input using the rule's expression
+    size_t pos = 0;
+    ASTNode* root = 0;
+    bool ok = parseExpression(r->rootExpr, input, pos, root, &ctx);
+    
+    if (!ok) {
+        DEBUG_MSG("Parse failed for rule: " + ruleName);
+        if (root) delete root;
+        ctx.ast = 0;
+        ctx.consumed = pos;
+        ctx.success = false;
+        // errorPos and expected already set by parseExpression
+        return;
+    }
+    
+    // Success
+    ctx.ast = root;
+    ctx.consumed = pos;
+    ctx.success = true;
+    DEBUG_MSG("Parse successful, consumed " << pos << " characters");
+}
+
+// Legacy parse interface for backward compatibility
+ASTNode* BNFParser::parse(const std::string& ruleName,
+                          const std::string& input,
+                          size_t& consumed) const
+{
+    DEBUG_MSG("Starting parse (legacy) for rule: " + ruleName + " with input: '" + input + "'");
+    consumed = 0;
+
+    // Find the requested grammar rule
+    Rule* r = grammar.getRule(ruleName);
+    if (!r) {
+        DEBUG_MSG("Rule not found: " + ruleName);
+        std::cerr << "BNFParser::parse: rule not found: " << ruleName << std::endl;
+        return 0;
+    }
+
+    // Attempt to parse the input using the rule's expression
+    size_t pos = 0;
+    ASTNode* root = 0;
+    bool ok = parseExpression(r->rootExpr, input, pos, root, 0); // nullptr for ctx
+
+    if (!ok) {
+        DEBUG_MSG("Parse failed for rule: " + ruleName);
+        if (root) delete root;
+        return 0;
+    }
+
+    consumed = pos;   // Export how much input was consumed by the parser
+    DEBUG_MSG("Parse successful, consumed " << consumed << " characters");
+    return root;
+}
 
 void BNFParser::mergeFirst(FirstInfo& dst, const FirstInfo& src) const {
     dst.chars |= src.chars;
@@ -118,48 +193,16 @@ std::string BNFParser::stripQuotes(const std::string& s) const{
     return s;
 }
 
-// Main parsing entry point - parses input according to the specified rule
-ASTNode* BNFParser::parse(const std::string& ruleName,
-                          const std::string& input,
-                          size_t& consumed) const
-{
-    DEBUG_MSG("Starting parse for rule: " + ruleName + " with input: '" + input + "'");
-    consumed = 0;
-
-    // Find the requested grammar rule
-    Rule* r = grammar.getRule(ruleName);
-    if (!r) {
-        DEBUG_MSG("Rule not found: " + ruleName);
-        std::cerr << "BNFParser::parse: rule not found: " << ruleName << std::endl;
-        return 0;
-    }
-
-    // Attempt to parse the input using the rule's expression
-    size_t pos = 0;
-    ASTNode* root = 0;
-    bool ok = parseExpression(r->rootExpr, input, pos, root);
-
-    if (!ok) {
-        DEBUG_MSG("Parse failed for rule: " + ruleName);
-        if (root) delete root;
-        return 0;
-    }
-
-    consumed = pos;   // Export how much input was consumed by the parser
-    DEBUG_MSG("Parse successful, consumed " << consumed << " characters");
-
-    return root;
-}
-
-
 // Recursive expression parser dispatcher - delegates to specific parsing functions
 bool BNFParser::parseExpression(Expression* expr,
                                 const std::string& input,
                                 size_t& pos,
-                                ASTNode*& outNode) const
+                                ASTNode*& outNode,
+                                ParseContext* ctx) const
 {
     if (!expr) {
         DEBUG_MSG("parseExpression: null expression");
+        if (ctx) ctx->updateError(pos, "null expression");
         return false;
     }
 
@@ -167,24 +210,25 @@ bool BNFParser::parseExpression(Expression* expr,
 
     switch (expr->type) {
         case Expression::EXPR_TERMINAL:
-            return parseTerminal(expr, input, pos, outNode);
+            return parseTerminal(expr, input, pos, outNode, ctx);
         case Expression::EXPR_SYMBOL:
-            return parseSymbol(expr, input, pos, outNode);
+            return parseSymbol(expr, input, pos, outNode, ctx);
         case Expression::EXPR_SEQUENCE:
-            return parseSequence(expr, input, pos, outNode);
+            return parseSequence(expr, input, pos, outNode, ctx);
         case Expression::EXPR_ALTERNATIVE:
-            return parseAlternative(expr, input, pos, outNode);
+            return parseAlternative(expr, input, pos, outNode, ctx);
         case Expression::EXPR_OPTIONAL:
-            return parseOptional(expr, input, pos, outNode);
+            return parseOptional(expr, input, pos, outNode, ctx);
         case Expression::EXPR_REPEAT:
-            return parseRepeat(expr, input, pos, outNode);
+            return parseRepeat(expr, input, pos, outNode, ctx);
         case Expression::EXPR_CHAR_RANGE:
-            return parseCharRange(expr, input, pos, outNode);
+            return parseCharRange(expr, input, pos, outNode, ctx);
         case Expression::EXPR_CHAR_CLASS:
-            return parseCharClass(expr, input, pos, outNode);
+            return parseCharClass(expr, input, pos, outNode, ctx);
         default:
             DEBUG_MSG("parseExpression: unsupported expr type " << expr->type);
             std::cerr << "BNFParser::parseExpression: unsupported expr type\n";
+            if (ctx) ctx->updateError(pos, "unsupported expression type");
             return false;
     }
 }
@@ -193,7 +237,8 @@ bool BNFParser::parseExpression(Expression* expr,
 bool BNFParser::parseTerminal(Expression* expr,
                               const std::string& input,
                               size_t& pos,
-                              ASTNode*& outNode) const
+                              ASTNode*& outNode,
+                              ParseContext* ctx) const
 {
     std::string literal = stripQuotes(expr->value);
     DEBUG_MSG("parseTerminal: trying to match '" << literal << "' at pos=" << pos);
@@ -201,6 +246,7 @@ bool BNFParser::parseTerminal(Expression* expr,
     size_t len = literal.size();
     if (len == 0) {
         DEBUG_MSG("parseTerminal: empty literal");
+        if (ctx) ctx->updateError(pos, "empty terminal");
         return false;
     }
 
@@ -214,6 +260,11 @@ bool BNFParser::parseTerminal(Expression* expr,
     }
     
     DEBUG_MSG("parseTerminal: failed to match '" + literal + "'");
+    if (ctx) {
+        std::ostringstream oss;
+        oss << "terminal '" << literal << "'";
+        ctx->updateError(pos, oss.str());
+    }
     return false;
 }
 
@@ -221,7 +272,8 @@ bool BNFParser::parseTerminal(Expression* expr,
 bool BNFParser::parseSymbol(Expression* expr,
                             const std::string& input,
                             size_t& pos,
-                            ASTNode*& outNode) const
+                            ASTNode*& outNode,
+                            ParseContext* ctx) const
 {
     DEBUG_MSG("parseSymbol: resolving symbol '" << expr->value << "' at pos=" << pos);
     
@@ -229,15 +281,21 @@ bool BNFParser::parseSymbol(Expression* expr,
     if (!rr) {
         DEBUG_MSG("parseSymbol: unknown symbol " << expr->value);
         std::cerr << "BNFParser::parseSymbol: unknown symbol " << expr->value << std::endl;
+        if (ctx) {
+            std::ostringstream oss;
+            oss << "symbol <" << expr->value << "> (undefined)";
+            ctx->updateError(pos, oss.str());
+        }
         return false;
     }
     
     size_t savedPos = pos;
     ASTNode* child = 0;
-    bool ok = parseExpression(rr->rootExpr, input, pos, child);
+    bool ok = parseExpression(rr->rootExpr, input, pos, child, ctx);
     if (!ok) {
         DEBUG_MSG("parseSymbol: failed to parse symbol " << expr->value);
         pos = savedPos;
+        // Error already recorded by parseExpression
         return false;
     }
 
@@ -255,7 +313,8 @@ bool BNFParser::parseSymbol(Expression* expr,
 bool BNFParser::parseSequence(Expression* expr,
                               const std::string& input,
                               size_t& pos,
-                              ASTNode*& outNode) const
+                              ASTNode*& outNode,
+                              ParseContext* ctx) const
 {
     DEBUG_MSG("parseSequence: parsing " << expr->children.size() << " elements at pos=" << pos);
 
@@ -265,12 +324,35 @@ bool BNFParser::parseSequence(Expression* expr,
 
     for (size_t i = 0; i < expr->children.size(); ++i) {
         ASTNode* childNode = 0;
-        bool ok = parseExpression(expr->children[i], input, pos, childNode);
+        size_t elemStartPos = pos;
+        bool ok = parseExpression(expr->children[i], input, pos, childNode, ctx);
         if (!ok) {
             DEBUG_MSG("parseSequence: failed at element " << i);
-            for (size_t j = 0; j < tmpChildren.size(); ++j)
-                delete tmpChildren[j];
+            
+            // Partial parsing: record successfully parsed children
+            if (ctx && !tmpChildren.empty()) {
+                // Add all successfully parsed children to partialNodes
+                for (size_t j = 0; j < tmpChildren.size(); ++j) {
+                    ctx->partialNodes.push_back(tmpChildren[j]);
+                }
+                // Don't delete tmpChildren - they're now owned by partialNodes
+                tmpChildren.clear();
+                
+                // Record the failure
+                std::string failedText;
+                if (elemStartPos < input.size()) {
+                    size_t endPos = std::min(elemStartPos + 20, input.size());
+                    failedText = input.substr(elemStartPos, endPos - elemStartPos);
+                }
+                ctx->failures.push_back(FailedNode(elemStartPos, failedText, ctx->expected, "<seq-element>"));
+            } else {
+                // No partial parsing or no successful children - clean up
+                for (size_t j = 0; j < tmpChildren.size(); ++j)
+                    delete tmpChildren[j];
+            }
+            
             pos = savedPos;
+            // Error already recorded by parseExpression
             return false;
         }
         tmpChildren.push_back(childNode);
@@ -292,7 +374,8 @@ bool BNFParser::parseSequence(Expression* expr,
 bool BNFParser::parseAlternative(Expression* expr,
                                  const std::string& input,
                                  size_t& pos,
-                                 ASTNode*& outNode) const
+                                 ASTNode*& outNode,
+                                 ParseContext* ctx) const
 {
     DEBUG_MSG("parseAlternative: trying " << expr->children.size() << " alternatives at pos=" << pos);
 
@@ -323,7 +406,7 @@ bool BNFParser::parseAlternative(Expression* expr,
         }
         size_t savedPos = pos;
         ASTNode* branchNode = 0;
-        bool ok = parseExpression(expr->children[i], input, pos, branchNode);
+        bool ok = parseExpression(expr->children[i], input, pos, branchNode, ctx);
 
         if (ok) {
             DEBUG_MSG("parseAlternative: alternative " << i << " matched, advanced to pos=" << pos);
@@ -345,6 +428,7 @@ bool BNFParser::parseAlternative(Expression* expr,
 
     if (!anyMatch) {
         DEBUG_MSG("parseAlternative: no alternatives matched");
+        // Error already updated by parseExpression calls
         return false;
     }
 
@@ -358,13 +442,14 @@ bool BNFParser::parseAlternative(Expression* expr,
 bool BNFParser::parseOptional(Expression* expr,
                               const std::string& input,
                               size_t& pos,
-                              ASTNode*& outNode) const
+                              ASTNode*& outNode,
+                              ParseContext* ctx) const
 {
     DEBUG_MSG("parseOptional: attempting optional at pos=" << pos);
 
     size_t savedPos = pos;
     ASTNode* inside = 0;
-    bool ok = parseExpression(expr->children[0], input, pos, inside);
+    bool ok = parseExpression(expr->children[0], input, pos, inside, ctx);
     if (!ok) {
         DEBUG_MSG("parseOptional: optional content not found, creating empty node");
         pos = savedPos;
@@ -388,7 +473,8 @@ bool BNFParser::parseOptional(Expression* expr,
 bool BNFParser::parseRepeat(Expression* expr,
                            const std::string& input,
                            size_t& pos,
-                           ASTNode*& outNode) const
+                           ASTNode*& outNode,
+                           ParseContext* ctx) const
 {
     DEBUG_MSG("parseRepeat: starting repetition at pos=" << pos);
 
@@ -399,8 +485,16 @@ bool BNFParser::parseRepeat(Expression* expr,
     while (true) {
         size_t iterSaved = pos;
         ASTNode* it = 0;
-        bool ok = parseExpression(expr->children[0], input, pos, it);
+        bool ok = parseExpression(expr->children[0], input, pos, it, ctx);
         if (!ok) {
+            // Repetition failure: record in partial parsing if we have context
+            if (ctx && iterations > 0 && iterSaved < input.size()) {
+                // We've already matched some items successfully
+                std::string failedText;
+                size_t endPos = std::min(iterSaved + 20, input.size());
+                failedText = input.substr(iterSaved, endPos - iterSaved);
+                ctx->failures.push_back(FailedNode(iterSaved, failedText, ctx->expected, "<rep-element>"));
+            }
             pos = iterSaved;
             break;
         }
@@ -412,6 +506,19 @@ bool BNFParser::parseRepeat(Expression* expr,
         if (it) {
             matchedAccum += it->matched;
             items.push_back(it);
+            
+            // Partial parsing: add each successfully parsed item
+            if (ctx) {
+                // Clone the item for partialNodes (the original goes into the repetition AST)
+                ASTNode* clone = new ASTNode(it->symbol);
+                clone->matched = it->matched;
+                for (size_t c = 0; c < it->children.size(); ++c) {
+                    // Shallow copy for demonstration - in production, might want deep copy
+                    clone->children.push_back(it->children[c]);
+                }
+                ctx->partialNodes.push_back(clone);
+            }
+            
             iterations++;
             DEBUG_MSG("parseRepeat: iteration " << iterations << " matched");
         } else {
@@ -433,10 +540,16 @@ bool BNFParser::parseRepeat(Expression* expr,
 bool BNFParser::parseCharRange(Expression* expr,
                                const std::string& input,
                                size_t& pos,
-                               ASTNode*& outNode) const
+                               ASTNode*& outNode,
+                               ParseContext* ctx) const
 {
     if (pos >= input.size()) {
         DEBUG_MSG("parseCharRange: reached end of input");
+        if (ctx) {
+            std::ostringstream oss;
+            oss << "character in range '" << (char)expr->charRange.start << "'...'" << (char)expr->charRange.end << "'";
+            ctx->updateError(pos, oss.str());
+        }
         return false;
     }
     
@@ -457,6 +570,11 @@ bool BNFParser::parseCharRange(Expression* expr,
     }
     
     DEBUG_MSG("parseCharRange: character " << (int)ch << " not in range");
+    if (ctx) {
+        std::ostringstream oss;
+        oss << "character in range '" << (char)start << "'...'" << (char)end << "'";
+        ctx->updateError(pos, oss.str());
+    }
     return false;
 }
 
@@ -464,10 +582,12 @@ bool BNFParser::parseCharRange(Expression* expr,
 bool BNFParser::parseCharClass(Expression* expr,
                                const std::string& input,
                                size_t& pos,
-                               ASTNode*& outNode) const
+                               ASTNode*& outNode,
+                               ParseContext* ctx) const
 {
     if (pos >= input.size()) {
         DEBUG_MSG("parseCharClass: reached end of input");
+        if (ctx) ctx->updateError(pos, "character class");
         return false;
     }
     
@@ -484,5 +604,6 @@ bool BNFParser::parseCharClass(Expression* expr,
     }
     
     DEBUG_MSG("parseCharClass: character " << (int)ch << " did not match class");
+    if (ctx) ctx->updateError(pos, "character class");
     return false;
 }
