@@ -89,6 +89,20 @@ private:
 	 */
 	Expression* parseFactor(BNFTokenizer& tz);
 
+	/**
+	 * @brief Parses a character class expression in parentheses.
+	 * @param tz Tokenizer to read from
+	 * @return Expression representing the character class
+	 */
+	Expression* parseCharClass(BNFTokenizer& tz);
+
+	/**
+	 * @brief Converts a token to a character value.
+	 * @param t Token (terminal or hex)
+	 * @return Character value
+	 */
+	unsigned char tokenToChar(const Token& t) const;
+
 	std::vector<Rule*> rules;   ///< Collection of grammar rules
 };
 #endif

@@ -111,6 +111,104 @@ void test_simple_command_rule(TestRunner& runner) {
 	}
 }
 
+/**
+ * @brief Test character range parsing.
+ */
+void test_char_range(TestRunner& runner) {
+	Grammar g;
+	g.addRule("<lower> ::= 'a' ... 'z'");
+	
+	Rule* r = g.getRule("<lower>");
+	ASSERT_NOT_NULL(runner, r);
+	ASSERT_NOT_NULL(runner, r->rootExpr);
+	
+	Expression* expr = r->rootExpr;
+	ASSERT_EQ(runner, expr->type, Expression::EXPR_CHAR_RANGE);
+	ASSERT_EQ(runner, static_cast<int>(expr->charRange.start), static_cast<int>('a'));
+	ASSERT_EQ(runner, static_cast<int>(expr->charRange.end), static_cast<int>('z'));
+}
+
+/**
+ * @brief Test hex range parsing.
+ */
+void test_hex_range(TestRunner& runner) {
+	Grammar g;
+	g.addRule("<ascii> ::= 0x00 ... 0x7F");
+	
+	Rule* r = g.getRule("<ascii>");
+	ASSERT_NOT_NULL(runner, r);
+	ASSERT_NOT_NULL(runner, r->rootExpr);
+	
+	Expression* expr = r->rootExpr;
+	ASSERT_EQ(runner, expr->type, Expression::EXPR_CHAR_RANGE);
+	ASSERT_EQ(runner, static_cast<int>(expr->charRange.start), 0x00);
+	ASSERT_EQ(runner, static_cast<int>(expr->charRange.end), 0x7F);
+}
+
+/**
+ * @brief Test inclusive character class parsing.
+ */
+void test_inclusive_char_class(TestRunner& runner) {
+	Grammar g;
+	g.addRule("<ident> ::= ( 'a' ... 'z' 'A' ... 'Z' '_' )");
+	
+	Rule* r = g.getRule("<ident>");
+	ASSERT_NOT_NULL(runner, r);
+	ASSERT_NOT_NULL(runner, r->rootExpr);
+	
+	Expression* expr = r->rootExpr;
+	ASSERT_EQ(runner, expr->type, Expression::EXPR_CHAR_CLASS);
+	ASSERT_EQ(runner, expr->isExclusion, false);
+	ASSERT_EQ(runner, expr->rangeList.size(), 2); // 'a'..'z' and 'A'..'Z'
+	ASSERT_EQ(runner, expr->charList.size(), 1); // '_'
+	
+	ASSERT_EQ(runner, static_cast<int>(expr->rangeList[0].start), static_cast<int>('a'));
+	ASSERT_EQ(runner, static_cast<int>(expr->rangeList[0].end), static_cast<int>('z'));
+	ASSERT_EQ(runner, static_cast<int>(expr->rangeList[1].start), static_cast<int>('A'));
+	ASSERT_EQ(runner, static_cast<int>(expr->rangeList[1].end), static_cast<int>('Z'));
+	ASSERT_EQ(runner, static_cast<int>(expr->charList[0]), static_cast<int>('_'));
+}
+
+/**
+ * @brief Test exclusive character class parsing.
+ */
+void test_exclusive_char_class(TestRunner& runner) {
+	Grammar g;
+	g.addRule("<nonspace> ::= ( ^ ' ' 0x0A 0x0D )");
+	
+	Rule* r = g.getRule("<nonspace>");
+	ASSERT_NOT_NULL(runner, r);
+	ASSERT_NOT_NULL(runner, r->rootExpr);
+	
+	Expression* expr = r->rootExpr;
+	ASSERT_EQ(runner, expr->type, Expression::EXPR_CHAR_CLASS);
+	ASSERT_EQ(runner, expr->isExclusion, true);
+	ASSERT_EQ(runner, expr->rangeList.size(), 0);
+	ASSERT_EQ(runner, expr->charList.size(), 3); // ' ', 0x0A, 0x0D
+	
+	ASSERT_EQ(runner, static_cast<int>(expr->charList[0]), static_cast<int>(' '));
+	ASSERT_EQ(runner, static_cast<int>(expr->charList[1]), 0x0A);
+	ASSERT_EQ(runner, static_cast<int>(expr->charList[2]), 0x0D);
+}
+
+/**
+ * @brief Test mixed character class with ranges and literals.
+ */
+void test_mixed_char_class(TestRunner& runner) {
+	Grammar g;
+	g.addRule("<token> ::= ( '0' ... '9' 'a' ... 'f' 'A' ... 'F' )");
+	
+	Rule* r = g.getRule("<token>");
+	ASSERT_NOT_NULL(runner, r);
+	ASSERT_NOT_NULL(runner, r->rootExpr);
+	
+	Expression* expr = r->rootExpr;
+	ASSERT_EQ(runner, expr->type, Expression::EXPR_CHAR_CLASS);
+	ASSERT_EQ(runner, expr->isExclusion, false);
+	ASSERT_EQ(runner, expr->rangeList.size(), 3); // 0-9, a-f, A-F
+	ASSERT_EQ(runner, expr->charList.size(), 0);
+}
+
 int main() {
 	TestSuite suite("Grammar Test Suite");
 	
@@ -118,6 +216,11 @@ int main() {
 	suite.addTest("Simple Letter Rule", test_simple_letter_rule);
 	suite.addTest("Simple Nick Rule", test_simple_nick_rule);
 	suite.addTest("Simple Command Rule", test_simple_command_rule);
+	suite.addTest("Character Range", test_char_range);
+	suite.addTest("Hex Range", test_hex_range);
+	suite.addTest("Inclusive Character Class", test_inclusive_char_class);
+	suite.addTest("Exclusive Character Class", test_exclusive_char_class);
+	suite.addTest("Mixed Character Class", test_mixed_char_class);
 	
 	// Run all tests
 	TestRunner results = suite.run();

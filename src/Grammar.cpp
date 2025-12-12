@@ -171,9 +171,51 @@ Expression* Grammar::parseTerm(BNFTokenizer& tz) {
 }
 
 // parseFactor: create leaf expression nodes from tokens: symbols or terminals.
-// Emits an error for unexpected tokens.
+// Also handles character ranges and character classes.
 Expression* Grammar::parseFactor(BNFTokenizer& tz) {
     Token t = tz.next();
+
+    // Character class in parentheses
+    if (t.type == Token::TOK_LPAREN) {
+        return parseCharClass(tz);
+    }
+
+    // Check for character range (terminal/hex followed by ellipsis)
+    if (t.type == Token::TOK_TERMINAL || t.type == Token::TOK_HEX) {
+        Token peek = tz.peek();
+        if (peek.type == Token::TOK_ELLIPSIS) {
+            // This is a character range
+            tz.next(); // consume ellipsis
+            Token endToken = tz.next();
+            
+            if (endToken.type != Token::TOK_TERMINAL && endToken.type != Token::TOK_HEX) {
+                std::cerr << "Expected terminal or hex after ellipsis in range" << std::endl;
+                return NULL;
+            }
+            
+            unsigned char start = tokenToChar(t);
+            unsigned char end = tokenToChar(endToken);
+            
+            Expression* e = new Expression(Expression::EXPR_CHAR_RANGE);
+            e->charRange = CharRange(start, end);
+            
+            std::stringstream ss;
+            ss << "parseFactor: EXPR_CHAR_RANGE, start=" << (int)start << ", end=" << (int)end;
+            DEBUG_MSG(ss.str());
+            
+            return e;
+        }
+        
+        // Regular terminal (not a range)
+        Expression* e = new Expression(Expression::EXPR_TERMINAL);
+        e->value = t.value;
+
+        std::stringstream ss;
+        ss << "parseFactor: EXPR_TERMINAL, value=" << t.value;
+        DEBUG_MSG(ss.str());
+
+        return e;
+    }
 
     if (t.type == Token::TOK_SYMBOL) {
         Expression* e = new Expression(Expression::EXPR_SYMBOL);
@@ -186,7 +228,7 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
         return e;
     }
 
-    if (t.type == Token::TOK_TERMINAL || t.type == Token::TOK_WORD) {
+    if (t.type == Token::TOK_WORD) {
         Expression* e = new Expression(Expression::EXPR_TERMINAL);
         e->value = t.value;
 
@@ -201,4 +243,95 @@ Expression* Grammar::parseFactor(BNFTokenizer& tz) {
     return NULL;
 }
 
+// parseCharClass: parse a character class expression in parentheses
+// Format: ( [^] (terminal|hex|range)* )
+Expression* Grammar::parseCharClass(BNFTokenizer& tz) {
+    Expression* cls = new Expression(Expression::EXPR_CHAR_CLASS);
+    cls->isExclusion = false;
+    
+    // Check for exclusion marker (^)
+    Token t = tz.peek();
+    if (t.type == Token::TOK_CARET) {
+        tz.next(); // consume caret
+        cls->isExclusion = true;
+    }
+    
+    // Parse character list and ranges until we hit ')'
+    while (true) {
+        t = tz.peek();
+        
+        if (t.type == Token::TOK_RPAREN) {
+            tz.next(); // consume ')'
+            break;
+        }
+        
+        if (t.type == Token::TOK_END) {
+            std::cerr << "Unexpected end of input in character class" << std::endl;
+            delete cls;
+            return NULL;
+        }
+        
+        if (t.type == Token::TOK_TERMINAL || t.type == Token::TOK_HEX) {
+            tz.next(); // consume terminal/hex
+            
+            // Check if this is a range
+            Token peek = tz.peek();
+            if (peek.type == Token::TOK_ELLIPSIS) {
+                tz.next(); // consume ellipsis
+                Token endToken = tz.next();
+                
+                if (endToken.type != Token::TOK_TERMINAL && endToken.type != Token::TOK_HEX) {
+                    std::cerr << "Expected terminal or hex after ellipsis in character class range" << std::endl;
+                    delete cls;
+                    return NULL;
+                }
+                
+                unsigned char start = tokenToChar(t);
+                unsigned char end = tokenToChar(endToken);
+                cls->rangeList.push_back(CharRange(start, end));
+                
+                DEBUG_MSG("parseCharClass: added range " << (int)start << " ... " << (int)end);
+            } else {
+                // Single character
+                unsigned char ch = tokenToChar(t);
+                cls->charList.push_back(ch);
+                
+                DEBUG_MSG("parseCharClass: added char " << (int)ch);
+            }
+        } else {
+            std::cerr << "Unexpected token in character class: " << t.value << std::endl;
+            delete cls;
+            return NULL;
+        }
+    }
+    
+    std::stringstream ss;
+    ss << "parseCharClass: isExclusion=" << cls->isExclusion 
+       << ", chars=" << cls->charList.size()
+       << ", ranges=" << cls->rangeList.size();
+    DEBUG_MSG(ss.str());
+    
+    return cls;
+}
+
+// tokenToChar: convert a terminal or hex token to a character value
+unsigned char Grammar::tokenToChar(const Token& t) const {
+    if (t.type == Token::TOK_TERMINAL) {
+        // Terminal tokens are stored without quotes
+        if (t.value.empty()) return 0;
+        return static_cast<unsigned char>(t.value[0]);
+    }
+    
+    if (t.type == Token::TOK_HEX) {
+        // Parse hexadecimal value (format: 0xNN)
+        std::string hexStr = t.value.substr(2); // skip "0x"
+        unsigned int val = 0;
+        std::stringstream ss;
+        ss << std::hex << hexStr;
+        ss >> val;
+        return static_cast<unsigned char>(val);
+    }
+    
+    return 0;
+}
 
