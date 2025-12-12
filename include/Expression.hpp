@@ -5,6 +5,28 @@
 #include <vector>
 
 /**
+ * @brief Represents a single character range.
+ * 
+ * Used within character class expressions to store ranges like 'a' ... 'z'.
+ */
+struct CharRange {
+    unsigned char start;  ///< Start character of the range
+    unsigned char end;    ///< End character of the range (inclusive)
+    
+    /**
+     * @brief Constructs a character range.
+     * @param s Start character
+     * @param e End character
+     */
+    CharRange(unsigned char s, unsigned char e);
+    
+    /**
+     * @brief Default constructor.
+     */
+    CharRange();
+};
+
+/**
  * @brief Represents a grammar expression node used by the interpreter.
  *
  * The Expression structure models different grammar constructs (sequence,
@@ -21,6 +43,8 @@ struct Expression {
      * - EXPR_REPEAT: a repeating child expression (zero or more).
      * - EXPR_SYMBOL: a non-terminal symbol reference.
      * - EXPR_TERMINAL: a terminal token/value.
+     * - EXPR_CHAR_RANGE: a character range (e.g., 'a' ... 'z').
+     * - EXPR_CHAR_CLASS: a character class (e.g., ( 'a' ... 'z' '0' '9' )).
      */
     enum Type {
         EXPR_SEQUENCE,
@@ -28,7 +52,9 @@ struct Expression {
         EXPR_OPTIONAL,
         EXPR_REPEAT,
         EXPR_SYMBOL,
-        EXPR_TERMINAL
+        EXPR_TERMINAL,
+        EXPR_CHAR_RANGE,
+        EXPR_CHAR_CLASS
     };
 
     // The node type.
@@ -37,6 +63,19 @@ struct Expression {
     std::vector<Expression*> children;
     // Optional textual value (e.g. symbol name or terminal text).
     std::string value;
+    
+    // ===== Character Range/Class specific fields =====
+    // For EXPR_CHAR_RANGE: stores the start and end character
+    CharRange charRange;
+    
+    // For EXPR_CHAR_CLASS: indicates exclusion mode (^ prefix)
+    bool isExclusion;
+    
+    // For EXPR_CHAR_CLASS: list of individual characters
+    std::vector<unsigned char> charList;
+    
+    // For EXPR_CHAR_CLASS: list of character ranges
+    std::vector<CharRange> rangeList;
 
     /**
      * @brief Constructs an Expression of the given type.

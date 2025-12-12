@@ -1,9 +1,15 @@
 #include "Expression.hpp"
 #include "Debug.hpp"
 
+// CharRange implementation
+CharRange::CharRange() : start(0), end(0) {}
+
+CharRange::CharRange(unsigned char s, unsigned char e)
+    : start(s), end(e) {}
+
 // Expression implementation
 Expression::Expression(Type t)
-    : type(t) {
+    : type(t), isExclusion(false) {
     DEBUG_MSG("Expression created: type=" << t);
 }
 
